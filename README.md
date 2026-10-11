@@ -29,6 +29,7 @@ by `@cursor/sdk`).
 |---|---|
 | **OpenCode 1.x** | `"plugin": ["@rama_nigg/open-cursor"]` (installer below) |
 | **OpenCode 2.0** | `"plugins": ["@rama_nigg/open-cursor"]` — see [OpenCode 2.0 setup](docs/opencode-2.md) |
+| **DeepSeek Harness** | `dsh plugin add` — see [DeepSeek Harness setup](docs/deepseek-harness.md) |
 
 ## Installation
 
@@ -63,6 +64,16 @@ For OpenCode 2.0, skip the 1.x installer and add the package to `plugins`
 ```
 
 Details: [OpenCode 2.0 setup](docs/opencode-2.md).
+
+DeepSeek Harness loads the same package as a provider bundle. The `cursor-acp`
+route streams through this proxy, and Harness keeps the tool loop:
+
+```bash
+export CURSOR_API_KEY=...
+dsh plugin --profile web add github:louisgoodabxd/dsh-cursor
+```
+
+Details: [DeepSeek Harness setup](docs/deepseek-harness.md).
 
 For shell, manual, and source installation, see the
 [installation guide](https://nomadcxx.github.io/opencode-cursor/docs/getting-started/installation/).

@@ -1,0 +1,6 @@
+# Cursor subscription models inside DeepSeek Harness.
+# The OpenCode plugin entry stays the package root; this layer loads the
+# harness adapter, which starts the same local Cursor proxy.
+- insert:
+    - id: llm-cursor
+      name: '@rama_nigg/open-cursor/dsh'

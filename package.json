@@ -6,13 +6,14 @@
   "main": "dist/plugin-entry.js",
   "module": "src/plugin-entry.ts",
   "scripts": {
-    "build": "bun build ./src/index.ts ./src/plugin-entry.ts ./src/plugin-opencode2.ts ./src/cli/discover.ts ./src/cli/opencode-cursor.ts ./src/cli/mcptool.ts --outdir ./dist --target node --external @opencode-ai/plugin --external zod",
-    "dev": "bun build ./src/index.ts ./src/plugin-entry.ts ./src/plugin-opencode2.ts ./src/cli/discover.ts ./src/cli/opencode-cursor.ts ./src/cli/mcptool.ts --outdir ./dist --target node --watch --external @opencode-ai/plugin --external zod",
+    "build": "bun build ./src/index.ts ./src/plugin-entry.ts ./src/plugin-opencode2.ts ./src/dsh-plugin.ts ./src/cli/discover.ts ./src/cli/opencode-cursor.ts ./src/cli/mcptool.ts --outdir ./dist --target node --external @opencode-ai/plugin --external @opencode-ai/sdk --external @modelcontextprotocol/sdk --external ai --external strip-ansi --external zod --external @cursor/sdk --external @deepseek-ai/dsh-llm --external @deepseek-ai/cordis --external @deepseek-ai/schemastery",
+    "dev": "bun build ./src/index.ts ./src/plugin-entry.ts ./src/plugin-opencode2.ts ./src/dsh-plugin.ts ./src/cli/discover.ts ./src/cli/opencode-cursor.ts ./src/cli/mcptool.ts --outdir ./dist --target node --watch --external @opencode-ai/plugin --external @opencode-ai/sdk --external @modelcontextprotocol/sdk --external ai --external strip-ansi --external zod --external @cursor/sdk --external @deepseek-ai/dsh-llm --external @deepseek-ai/cordis --external @deepseek-ai/schemastery",
+    "prepare": "bun run build",
     "test": "bun test",
     "test:unit": "bun test --isolate tests/unit",
     "test:integration": "bun test tests/integration",
     "test:perf": "bun test tests/unit/perf.test.ts tests/unit/utils/logger.test.ts tests/unit/proxy/prompt-builder.test.ts tests/unit/proxy/session-resume.test.ts tests/unit/proxy/incremental-prompt.test.ts tests/unit/proxy/plugin-resume.test.ts tests/unit/cursor-agent-child.test.ts tests/unit/cursor-agent-runner.test.ts tests/unit/streaming/line-buffer.test.ts tests/unit/streaming/parser.test.ts tests/unit/streaming/delta-tracker.test.ts tests/unit/streaming/openai-sse.test.ts tests/integration/sdk-demux-roundtrip.test.ts",
-    "test:ci:unit": "bun test --isolate tests/tools/defaults.test.ts tests/tools/executor-chain.test.ts tests/tools/sdk-executor.test.ts tests/tools/mcp-executor.test.ts tests/tools/skills.test.ts tests/tools/registry.test.ts tests/unit/cli/opencode-cursor.test.ts tests/unit/cli/cursor-bridge-install.test.ts tests/unit/cli/model-discovery.test.ts tests/unit/cursor-agent-child.test.ts tests/unit/cursor-agent-pool.test.ts tests/unit/cursor-agent-runner.test.ts tests/unit/errors.test.ts tests/unit/binary-strict.test.ts tests/unit/cursor-agent-fallback.test.ts tests/unit/models/discovery.test.ts tests/unit/proxy/bridge-json.test.ts tests/unit/proxy/image-extract.test.ts tests/unit/proxy/prompt-builder.test.ts tests/unit/proxy/tool-loop.test.ts tests/unit/proxy/session-resume.test.ts tests/unit/proxy/incremental-prompt.test.ts tests/unit/proxy/plugin-resume.test.ts tests/unit/provider-backend.test.ts tests/unit/provider-boundary.test.ts tests/unit/provider-runtime-interception.test.ts tests/unit/provider-tool-schema-compat.test.ts tests/unit/provider-tool-loop-guard.test.ts tests/unit/mcp/tool-bridge.test.ts tests/unit/sdk-child-images.test.ts tests/unit/sdk-child.test.ts tests/unit/sdk-runner.test.ts tests/unit/plugin.test.ts tests/unit/plugin-opencode2.test.ts tests/unit/plugin-system-message.test.ts tests/unit/plugin-tools-hook.test.ts tests/unit/plugin-tool-resolution.test.ts tests/unit/plugin-config.test.ts tests/unit/plugin-stream-extraction.test.ts tests/unit/auth.test.ts tests/unit/streaming/line-buffer.test.ts tests/unit/streaming/parser.test.ts tests/unit/streaming/types.test.ts tests/unit/streaming/delta-tracker.test.ts tests/unit/streaming/openai-sse.test.ts tests/unit/streaming/ai-sdk-parts.test.ts tests/competitive/edge.test.ts",
+    "test:ci:unit": "bun test --isolate tests/tools/defaults.test.ts tests/tools/executor-chain.test.ts tests/tools/sdk-executor.test.ts tests/tools/mcp-executor.test.ts tests/tools/skills.test.ts tests/tools/registry.test.ts tests/unit/cli/opencode-cursor.test.ts tests/unit/cli/cursor-bridge-install.test.ts tests/unit/cli/model-discovery.test.ts tests/unit/cursor-agent-child.test.ts tests/unit/cursor-agent-pool.test.ts tests/unit/cursor-agent-runner.test.ts tests/unit/errors.test.ts tests/unit/binary-strict.test.ts tests/unit/cursor-agent-fallback.test.ts tests/unit/models/discovery.test.ts tests/unit/proxy/bridge-json.test.ts tests/unit/proxy/image-extract.test.ts tests/unit/proxy/prompt-builder.test.ts tests/unit/proxy/tool-loop.test.ts tests/unit/proxy/session-resume.test.ts tests/unit/proxy/incremental-prompt.test.ts tests/unit/proxy/plugin-resume.test.ts tests/unit/provider-backend.test.ts tests/unit/provider-boundary.test.ts tests/unit/provider-runtime-interception.test.ts tests/unit/provider-tool-schema-compat.test.ts tests/unit/provider-tool-loop-guard.test.ts tests/unit/mcp/tool-bridge.test.ts tests/unit/sdk-child-images.test.ts tests/unit/sdk-child.test.ts tests/unit/sdk-runner.test.ts tests/unit/plugin.test.ts tests/unit/plugin-opencode2.test.ts tests/unit/plugin-system-message.test.ts tests/unit/plugin-tools-hook.test.ts tests/unit/plugin-tool-resolution.test.ts tests/unit/plugin-config.test.ts tests/unit/plugin-stream-extraction.test.ts tests/unit/auth.test.ts tests/unit/streaming/line-buffer.test.ts tests/unit/streaming/parser.test.ts tests/unit/streaming/types.test.ts tests/unit/streaming/delta-tracker.test.ts tests/unit/streaming/openai-sse.test.ts tests/unit/streaming/ai-sdk-parts.test.ts tests/unit/dsh-adapter.test.ts tests/competitive/edge.test.ts",
     "test:ci:integration": "bun test tests/integration/comprehensive.test.ts tests/integration/tools-router.integration.test.ts tests/integration/stream-router.integration.test.ts tests/integration/opencode-loop.integration.test.ts",
     "verify:issue-92": "bash scripts/verify-issue-92.sh",
     "check:pricing": "bun run scripts/check-cursor-pricing-coverage.ts",
@@ -36,6 +37,11 @@
       "import": "./dist/plugin-opencode2.js",
       "default": "./dist/plugin-opencode2.js"
     },
+    "./dsh": {
+      "bun": "./src/dsh-plugin.ts",
+      "import": "./dist/dsh-plugin.js",
+      "default": "./dist/dsh-plugin.js"
+    },
     "./lib": {
       "bun": "./src/index.ts",
       "import": "./dist/index.js",
@@ -45,13 +51,19 @@
   "files": [
     "dist",
     "src",
+    "cordis.patch.yml",
     "scripts/sdk-runner.mjs",
     "scripts/cursor-agent-runner.mjs"
   ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
     "@opencode-ai/plugin": "1.1.53",
-    "@opencode-ai/sdk": "1.1.53",
+    "@opencode-ai/sdk": "^1.0.0",
     "ai": "^6.0.55",
     "strip-ansi": "^7.1.0"
   },
@@ -59,12 +71,29 @@
     "@cursor/sdk": "^1.0.18"
   },
   "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.4",
+    "@deepseek-ai/dsh-llm": "0.2.0-rc.2",
+    "@deepseek-ai/schemastery": "3.18.4",
     "@types/node": "^22.0.0",
     "typescript": "^5.8.0"
   },
   "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/dsh-llm": "*",
+    "@deepseek-ai/schemastery": "*",
     "@opencode-ai/sdk": "^1.0.0",
     "bun-types": "^1.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-llm": {
+      "optional": true
+    },
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    }
   },
   "license": "ISC",
   "repository": {
@@ -81,7 +110,9 @@
     "ai",
     "streaming",
     "plugin",
-    "cursor-agent"
+    "cursor-agent",
+    "deepseek-harness",
+    "dsh"
   ],
   "author": "Nomadcxx"
 }

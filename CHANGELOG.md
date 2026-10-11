@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **DeepSeek Harness:** the package is also a Harness bundle (`dsh.bundle`). `dsh plugin add` registers provider `cursor-acp`, starts the existing local Cursor proxy, and translates Harness `GenerateOptions` / `StreamChunk`s onto that OpenAI-compatible stream. Harness keeps the tool loop. See `docs/deepseek-harness.md`.
+  - Transient proxy failures use the harness retry codes `SERVER`, `TIMEOUT`, and `TRANSPORT`. A header-illegal API key is refused as `INVALID_CREDENTIAL` at load.
+  - The model catalog drops blank and duplicate ids. Lookup settles when the caller aborts during discovery.
+  - The `llm-cursor` settings namespace can list models through harness model discovery.
+
 - **OpenCode 2.0 stable support:** `"plugins": ["@rama_nigg/open-cursor"]` loads a `setup()` that uses `ctx.provider.transform` + in-memory model inventory (no `opencode.json` dump, no removed `ctx.catalog`). Same local proxy + `@cursor/sdk` backend as OpenCode 1.x. See `docs/opencode-2.md`.
   - Registers no plugin tools: OpenCode 2.0's permission-checked builtins (`read`, `shell`, `glob`, `grep`, `edit`, `write`, …) are never replaced; Cursor tool calls are forwarded to them (`bash` aliases map to `shell`).
   - MCP servers come from OpenCode 2.0 itself; tools of servers that do not set `"codemode": true` join the direct catalog so Cursor can call them by name (`mcp__<server>__<tool>` maps to `<server>_<tool>`). The plugin's own MCP bridge is not used on 2.0.
