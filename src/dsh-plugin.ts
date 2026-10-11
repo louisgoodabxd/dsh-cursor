@@ -9,8 +9,10 @@ import type { Context } from "@deepseek-ai/cordis";
 import {
   LlmAdapter,
   LlmError,
+  assertUsableApiKey,
   attributionHeaders,
   type GenerateOptions,
+  type LlmDiscoveredModel,
   type LlmModelInfo,
   type LlmResolvedModelInfo,
   type StreamChunk,
@@ -21,6 +23,7 @@ import { CursorHarnessAdapter, CURSOR_PROVIDER_ID, type HarnessRequest } from ".
 import { CursorHarnessError } from "./dsh/errors.js";
 
 export const name = "llm-cursor";
+export const SETTINGS_NS = "llm-cursor";
 export const inject = ["llm"] as const;
 
 export interface Config {
@@ -39,7 +42,7 @@ export const Config: z<Config> = z.object({
   baseURL: z.string(),
 });
 
-class CursorDshAdapter extends LlmAdapter {
+export class CursorDshAdapter extends LlmAdapter {
   constructor(private readonly core: CursorHarnessAdapter) {
     super();
   }
@@ -69,7 +72,7 @@ class CursorDshAdapter extends LlmAdapter {
 }
 
 export function apply(ctx: Context, config: Config = {}): void {
-  const apiKey = firstNonEmpty(config.apiKey, process.env.CURSOR_API_KEY);
+  const apiKey = usableApiKey(config);
   if (apiKey) setStoredApiKey(apiKey);
 
   const providers = (config.providers ?? []).map((provider) => provider.trim()).filter((provider) => provider.length > 0);
@@ -82,18 +85,37 @@ export function apply(ctx: Context, config: Config = {}): void {
   });
   const adapter = new CursorDshAdapter(core);
 
-  const registerDirectory = (ctx.llm as { registerConfigurableProviders?: (entries: unknown[]) => void })
-    .registerConfigurableProviders;
-  if (typeof registerDirectory === "function") {
-    registerDirectory.call(ctx.llm, routes.map((provider) => ({
-      provider,
-      displayName: "Cursor",
-      settingsNs: "llm-cursor",
-      settingsPath: [] as const,
-    })));
-  }
-
+  ctx.llm.registerConfigurableProviders(routes.map((provider) => ({
+    provider,
+    displayName: "Cursor",
+    settingsNs: SETTINGS_NS,
+    settingsPath: [] as const,
+  })));
+  ctx.llm.registerModelDiscovery(SETTINGS_NS, (request, signal) => discoverCursorModels(core, routes, request.provider, signal));
   ctx.llm.registerAdapter(routes, adapter);
+}
+
+function discoverCursorModels(
+  core: CursorHarnessAdapter,
+  routes: readonly string[],
+  provider: string | undefined,
+  signal?: AbortSignal,
+): Promise<LlmDiscoveredModel[]> {
+  const route = typeof provider === "string" && provider.trim().length > 0 ? provider.trim() : routes[0] ?? CURSOR_PROVIDER_ID;
+  return core.listModels(route, signal).then((models) => models.map((model) => ({
+    id: model.id,
+    name: model.name,
+    contextWindow: model.context.contextWindow,
+    inputModalities: [...model.inputModalities],
+  })));
+}
+
+function usableApiKey(config: Config): string | undefined {
+  const fromConfig = firstNonEmpty(config.apiKey);
+  if (fromConfig) return assertUsableApiKey(fromConfig, "llm-cursor", "apiKey");
+  const fromEnv = firstNonEmpty(process.env.CURSOR_API_KEY);
+  if (fromEnv) return assertUsableApiKey(fromEnv, "llm-cursor", "CURSOR_API_KEY");
+  return undefined;
 }
 
 function firstNonEmpty(...values: Array<string | undefined>): string | undefined {

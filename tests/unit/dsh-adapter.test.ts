@@ -1,13 +1,14 @@
 import { describe, expect, test } from "bun:test";
+import { Context } from "@deepseek-ai/cordis";
+import { BlockAssembler, LlmError, LlmRuntime } from "@deepseek-ai/dsh-llm";
 import { createOpenAiUsage } from "../../src/usage.js";
-import { OPENCODE_DIRECTORY_HEADER } from "../../src/plugin.js";
+import { OPENCODE_DIRECTORY_HEADER, setStoredApiKey } from "../../src/plugin.js";
 import { CursorHarnessAdapter, WORKSPACE_HEADER } from "../../src/dsh/adapter.js";
 import { CursorHarnessError } from "../../src/dsh/errors.js";
 import { buildChatBody, cursorModelId } from "../../src/dsh/messages.js";
 import { chunksFromSsePayloads, OpenAiChunkAssembler, usageFromOpenAi } from "../../src/dsh/sse.js";
 import type { ChunkLike } from "../../src/dsh/sse.js";
-import { asLlmError } from "../../src/dsh-plugin.js";
-import { LlmError } from "@deepseek-ai/dsh-llm";
+import { apply, asLlmError, Config, CursorDshAdapter, name, SETTINGS_NS } from "../../src/dsh-plugin.js";
 
 async function collect(source: AsyncIterable<ChunkLike>): Promise<ChunkLike[]> {
   const chunks: ChunkLike[] = [];
@@ -57,8 +58,14 @@ describe("dsh messages", () => {
         {
           role: "user",
           content: [
-            { type: "file", attachment: { name: "notes.txt", bytes: 4 } },
+            { type: "file", attachment: { name: "loose.txt", bytes: 2 } },
+            { type: "file", attachment: { name: "notes.txt", bytes: 4, attachmentId: "sha256:abcdef0123456789" } },
             { type: "image", offloaded: true, attachment: { name: "shot.png" } },
+            {
+              type: "image",
+              offloaded: true,
+              attachment: { name: "shot.png", attachmentId: "sha256:0123456789abcdef" },
+            },
           ],
         },
       ],
@@ -85,8 +92,12 @@ describe("dsh messages", () => {
     expect(assistant.tool_calls[0]?.id).toBe("call_1");
     expect(body.messages[4]?.content).toBe("ERROR: denied");
     expect(body.messages[5]?.content).toBe("Tool added: read");
-    expect(body.messages[6]?.content).toContain("[file notes.txt, 4 bytes]");
-    expect(body.messages[6]?.content).toContain("shot.png");
+    const projected = String(body.messages[6]?.content);
+    expect(projected).toContain("[file loose.txt, 2 bytes]");
+    expect(projected).toContain('File "notes.txt" (4 bytes, sha256:abcdef01)');
+    expect(projected).toContain("do not claim to have read it");
+    expect(projected).toContain("[image omitted to fit request image limits; shot.png.]");
+    expect(projected).toContain('image omitted to fit request image limits; "shot.png" (sha256:0123456789abcdef)');
   });
 });
 
@@ -159,6 +170,17 @@ describe("dsh sse", () => {
     });
     expect(chunks.at(-1)).toEqual({ type: "finish", reason: { kind: "tool-calls" } });
     expect(chunks.at(-2)?.type).toBe("usage");
+
+    const assembled = new BlockAssembler();
+    for (const chunk of chunks) assembled.push(chunk as never);
+    expect(assembled.finish).toEqual({ kind: "tool-calls" });
+    expect(assembled.blocks().map((block) => block.type)).toEqual(["reasoning", "text", "tool-call"]);
+    expect(assembled.blocks().at(-1)).toMatchObject({
+      type: "tool-call",
+      id: "call_9",
+      name: "shell",
+      arguments: "{\"command\":\"ls\"}",
+    });
   });
 
   test("rejects an empty stream before emitting chunks", () => {
@@ -273,6 +295,163 @@ describe("dsh adapter", () => {
     }, {}), "AUTH");
     expect(error.status).toBe(401);
     expect(calls).toBe(1);
+
+    const server = await expectReject(new CursorHarnessAdapter({
+      baseURL: "http://127.0.0.1:9/v1",
+      fetch: async () => new Response("upstream down", { status: 503 }),
+    }).stream({
+      provider: "cursor-acp",
+      model: "auto",
+      messages: [{ role: "user", content: [{ type: "text", text: "Hi" }] }],
+    }, {}), "SERVER");
+    expect(server.status).toBe(503);
+
+    await expectReject(new CursorHarnessAdapter({
+      baseURL: "http://127.0.0.1:9/v1",
+      fetch: async () => {
+        throw new TypeError("fetch failed");
+      },
+    }).stream({
+      provider: "cursor-acp",
+      model: "auto",
+      messages: [{ role: "user", content: [{ type: "text", text: "Hi" }] }],
+    }, {}), "TRANSPORT");
+  });
+
+  test("drops blank and duplicate model ids before Harness validates the catalog", async () => {
+    const adapter = new CursorHarnessAdapter({
+      baseURL: "http://127.0.0.1:9/v1",
+      discoverModels: async () => [
+        { id: "auto", name: "  " },
+        { id: "auto", name: "Auto again" },
+        { id: " ", name: "blank" },
+        { id: "composer-2", name: "Composer 2", description: "fast" },
+      ],
+    });
+    const models = await adapter.listModels("cursor-acp");
+    expect(models.map((model) => model.id)).toEqual(["auto", "composer-2"]);
+    expect(models[0]?.name).toBe("auto");
+    expect(models[1]).toMatchObject({ name: "Composer 2", description: "fast" });
+  });
+
+  test("model lookup settles when discovery is aborted", async () => {
+    const controller = new AbortController();
+    const adapter = new CursorHarnessAdapter({
+      discoverModels: () => new Promise(() => {}),
+    });
+    const pending = adapter.resolveModel("cursor-acp", "auto", controller.signal);
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  test("a key that cannot ride in an HTTP header is refused before registration", () => {
+    expect(() => apply({} as never, { apiKey: "bad key" })).toThrow(LlmError);
+  });
+
+  test("Harness rewrites images and files before the adapter, then assembles the reply", async () => {
+    const bodies: Array<{ messages: Array<{ content?: string }>; tools?: Array<{ function: { name: string } }> }> = [];
+    const ctx = new Context();
+    await ctx.plugin(LlmRuntime);
+    const core = new CursorHarnessAdapter({
+      apiKey: "test-key",
+      baseURL: "http://127.0.0.1:9/v1",
+      discoverModels: async () => [{ id: "auto", name: "Auto" }],
+      fetch: async (_input, init) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return new Response(sseBody([
+          { choices: [{ delta: { content: "Done" }, finish_reason: null }] },
+          { choices: [{ delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 3, completion_tokens: 1 } },
+        ]), {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      },
+    });
+    ctx.llm.registerAdapter(["cursor-acp"], new CursorDshAdapter(core));
+
+    const chunks = [];
+    for await (const chunk of ctx.llm.stream({
+      provider: "cursor-acp",
+      model: "auto",
+      tools: [
+        { name: "shell", description: "run", parameters: { type: "object" } },
+        { name: "hidden", description: "later", parameters: { type: "object" }, deferLoading: true },
+      ],
+      messages: [
+        { role: "developer", content: [{ type: "tool-addition", toolName: "read" }] },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Look" },
+            {
+              type: "image",
+              attachment: {
+                attachmentId: "sha256:0123456789abcdef",
+                mediaType: "image/png",
+                width: 1,
+                height: 1,
+              },
+            },
+            {
+              type: "file",
+              attachment: {
+                attachmentId: "sha256:abcdef0123456789",
+                name: "notes.txt",
+                bytes: 4,
+                mediaType: "text/plain",
+              },
+            },
+          ],
+        },
+      ] as never,
+    })) {
+      chunks.push(chunk);
+    }
+
+    const prompt = String(bodies[0]?.messages.map((message) => message.content).join("\n"));
+    expect(prompt).toContain("Look");
+    expect(prompt).toContain("image omitted because this model accepts text only; attachment sha256:01234567");
+    expect(prompt).toContain('File "notes.txt" (4 bytes, sha256:abcdef01)');
+    expect(prompt).not.toContain("Tool added");
+    expect(bodies[0]?.tools?.map((tool) => tool.function.name)).toEqual(["shell", "hidden"]);
+    expect(chunks.at(-1)).toMatchObject({ type: "finish", reason: { kind: "stop" } });
+
+    const assembled = new BlockAssembler();
+    for (const chunk of chunks) assembled.push(chunk);
+    expect(assembled.blocks()).toEqual([{ type: "text", text: "Done" }]);
+    expect(ctx.llm.listProviders()).toEqual([{ id: "cursor-acp", name: "Cursor" }]);
+    expect(name).toBe("llm-cursor");
+    expect(SETTINGS_NS).toBe("llm-cursor");
+  });
+
+  test("apply registers cursor-acp and answers model discovery from that catalog", async () => {
+    const previousExecutable = process.env.CURSOR_AGENT_EXECUTABLE;
+    const previousKey = process.env.CURSOR_API_KEY;
+    process.env.CURSOR_AGENT_EXECUTABLE = "/no/such/cursor-agent";
+    delete process.env.CURSOR_API_KEY;
+    const ctx = new Context();
+    try {
+      await ctx.plugin(LlmRuntime);
+      await ctx.plugin({ name, inject: ["llm"], apply, Config }, {
+        apiKey: "test-key",
+        baseURL: "http://127.0.0.1:9/v1",
+      });
+      expect(ctx.llm.listProviders()).toEqual([{ id: "cursor-acp", name: "Cursor" }]);
+      expect(ctx.llm.listConfigurableProviders()[0]).toMatchObject({
+        provider: "cursor-acp",
+        displayName: "Cursor",
+        settingsNs: SETTINGS_NS,
+      });
+      const discovered = await ctx.llm.discoverModels(SETTINGS_NS, { provider: "cursor-acp" });
+      expect(discovered.some((model) => model.id === "auto")).toBe(true);
+      expect(discovered.every((model) => model.inputModalities?.includes("text"))).toBe(true);
+    } finally {
+      setStoredApiKey(undefined);
+      if (previousExecutable === undefined) delete process.env.CURSOR_AGENT_EXECUTABLE;
+      else process.env.CURSOR_AGENT_EXECUTABLE = previousExecutable;
+      if (previousKey === undefined) delete process.env.CURSOR_API_KEY;
+      else process.env.CURSOR_API_KEY = previousKey;
+    }
   });
 
   test("an aborted signal finishes without calling the proxy", async () => {

@@ -77,16 +77,26 @@ field. `maxTokens` is forwarded on the request and also written into the
 prompt as a length instruction, because the agent backend does not enforce an
 output cap. `temperature` is forwarded on the JSON body only.
 
-Images are text-only. A request that still carries image bytes fails with
-`IMAGE_OFFLOAD_REQUIRED` so Harness can offload them and retry. Offloaded
-images are sent as placeholder text. The model list declares input modality
-`text`.
+The model list declares input modality `text`. Harness rewrites image blocks
+to its text-only placeholder before `stream()` runs, and rewrites file blocks
+to handle text the same way. An image block that still reaches the adapter
+fails with `IMAGE_OFFLOAD_REQUIRED` and `offloadImages` set to the number of
+live images, so the offload executor can drop them and retry. Images already
+marked offloaded are sent as the harness offload placeholder.
+
+HTTP 408 and 504 are `TIMEOUT`, other 5xx responses are `SERVER`, and a
+failed connection is `TRANSPORT`. Those three are in the default retry set.
+401 and 403 stay `AUTH`. A key that contains characters an HTTP header cannot
+carry is refused as `INVALID_CREDENTIAL` when the plugin loads.
 
 ## Tools
 
 Leave `CURSOR_ACP_TOOL_LOOP_MODE` at its default, `opencode`. Harness tool
 names that match a Cursor call (or a known alias such as `bash` → `shell`)
-are returned as harness tool calls. Other calls run inside Cursor.
+are returned as harness tool calls. Other calls run inside Cursor. This
+route does not advertise mid-conversation tool updates, so Harness sends the
+current tool list on every request, including tools that were marked for
+deferred loading.
 
 The workspace directory is the one configured above. Harness does not send a
 per-session project path on `GenerateOptions`.

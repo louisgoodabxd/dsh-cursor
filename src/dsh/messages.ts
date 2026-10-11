@@ -3,6 +3,8 @@
  * Cursor proxy already understands (roles, tool_calls, tool results).
  */
 
+import { fileHandleText, offloadedImageText } from "@deepseek-ai/dsh-llm";
+
 export interface ContentBlockLike {
   type: string;
   text?: string;
@@ -67,12 +69,31 @@ export function countLiveImages(messages: readonly MessageLike[]): number {
 
 function imagePlaceholder(block: ContentBlockLike): string {
   const attachment = block.attachment;
-  const label = attachment?.name || attachment?.attachmentId || "untitled";
+  const attachmentId = typeof attachment?.attachmentId === "string" ? attachment.attachmentId : "";
+  if (attachmentId.length > 0) {
+    return offloadedImageText({
+      attachmentId,
+      ...(typeof attachment?.name === "string" ? { name: attachment.name } : {}),
+    } as Parameters<typeof offloadedImageText>[0]);
+  }
+  const label = attachment?.name || "untitled";
   return `[image omitted to fit request image limits; ${label}.]`;
 }
 
 function filePlaceholder(block: ContentBlockLike): string {
   const attachment = block.attachment;
+  const attachmentId = typeof attachment?.attachmentId === "string" ? attachment.attachmentId : "";
+  if (
+    attachmentId.length > 0
+    && typeof attachment?.name === "string"
+    && typeof attachment.bytes === "number"
+  ) {
+    return fileHandleText({
+      attachmentId,
+      name: attachment.name,
+      bytes: attachment.bytes,
+    } as Parameters<typeof fileHandleText>[0], undefined);
+  }
   const name = attachment?.name || attachment?.attachmentId || "file";
   const bytes = typeof attachment?.bytes === "number" ? `, ${attachment.bytes} bytes` : "";
   return `[file ${name}${bytes}]`;

@@ -104,8 +104,8 @@ export class CursorHarnessAdapter {
     return { id: provider, name: "Cursor" };
   }
 
-  async listModels(provider: string): Promise<Array<ResolvedModel & { provider: string }>> {
-    const models = await this.cachedModels();
+  async listModels(provider: string, signal?: AbortSignal): Promise<Array<ResolvedModel & { provider: string }>> {
+    const models = await this.cachedModels(signal);
     return models.map((model) => this.describe(provider, model.id, model.name, model.description));
   }
 
@@ -184,7 +184,7 @@ export class CursorHarnessAdapter {
       }
       throw new CursorHarnessError(
         error instanceof Error ? error.message : String(error),
-        "CURSOR_PROXY_ERROR",
+        "TRANSPORT",
         { cause: error },
       );
     }
@@ -222,8 +222,9 @@ export class CursorHarnessAdapter {
     if (this.modelsCache) return this.modelsCache;
     throwIfAborted(signal);
     try {
-      const models = await this.discoverModels(this.apiKey, signal);
+      const discovered = await withAbort(startDiscovery(this.discoverModels, this.apiKey, signal), signal);
       throwIfAborted(signal);
+      const models = sanitizeModels(discovered);
       if (models.length > 0) {
         this.modelsCache = models;
         return models;
@@ -232,7 +233,8 @@ export class CursorHarnessAdapter {
       if (signal?.aborted || isAbortError(error)) throw error;
       log.debug("Model discovery failed; using static fallback", { error: String(error) });
     }
-    const fallback = fallbackModels();
+    throwIfAborted(signal);
+    const fallback = sanitizeModels(fallbackModels());
     this.modelsCache = fallback;
     return fallback;
   }
@@ -251,12 +253,65 @@ function positiveInt(value: number | undefined, fallback: number): number {
   return Math.floor(value);
 }
 
-function throwIfAborted(signal?: AbortSignal): void {
-  if (signal?.aborted) {
-    const error = new Error("The Cursor request was aborted");
-    error.name = "AbortError";
-    throw error;
+function startDiscovery(
+  discover: CursorHarnessAdapterOptions["discoverModels"],
+  apiKey: string | undefined,
+  signal?: AbortSignal,
+): Promise<ModelListing[]> {
+  if (!discover) return Promise.resolve([]);
+  try {
+    return Promise.resolve(discover(apiKey, signal));
+  } catch (error) {
+    return Promise.reject(error);
   }
+}
+
+function abortError(): Error {
+  const error = new Error("The Cursor request was aborted");
+  error.name = "AbortError";
+  return error;
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw abortError();
+}
+
+/** Settle as soon as `signal` aborts, even when `work` cannot be cancelled. */
+function withAbort<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return work;
+  if (signal.aborted) return Promise.reject(abortError());
+  return new Promise<T>((resolve, reject) => {
+    const fail = () => reject(abortError());
+    signal.addEventListener("abort", fail, { once: true });
+    work.then(
+      (value) => {
+        signal.removeEventListener("abort", fail);
+        if (signal.aborted) reject(abortError());
+        else resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", fail);
+        if (signal.aborted) reject(abortError());
+        else reject(error);
+      },
+    );
+  });
+}
+
+export function sanitizeModels(models: readonly ModelListing[]): ModelListing[] {
+  const seen = new Set<string>();
+  const clean: ModelListing[] = [];
+  for (const model of models) {
+    const id = typeof model?.id === "string" ? model.id.trim() : "";
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const name = typeof model?.name === "string" && model.name.trim().length > 0 ? model.name.trim() : id;
+    const description = typeof model?.description === "string" && model.description.length > 0
+      ? model.description
+      : undefined;
+    clean.push({ id, name, ...(description ? { description } : {}) });
+  }
+  return clean;
 }
 
 function* abortedFinish(): Generator<ChunkLike> {
@@ -279,7 +334,8 @@ export function failureFromHttp(status: number, body: string): CursorHarnessErro
   else if (/quota|insufficient credits|billing|usage limit|exceeded your/.test(haystack)) code = "QUOTA";
   else if (/context window|context length|maximum context|too many tokens|context_length/.test(haystack)) {
     code = "CONTEXT_WINDOW_EXCEEDED";
-  }
+  } else if (status === 408 || status === 504) code = "TIMEOUT";
+  else if (status >= 500 && status <= 599) code = "SERVER";
   return new CursorHarnessError(message, code, { status });
 }
 
